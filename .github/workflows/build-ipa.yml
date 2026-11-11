@@ -1,0 +1,65 @@
+name: Build Unsigned Frosty IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Checkout Frosty source
+        uses: actions/checkout@v4
+        with:
+          repository: tommyxchow/frosty
+          path: frosty
+          ref: main
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.6'
+          cache: true
+
+      - name: Flutter doctor
+        working-directory: frosty
+        run: flutter doctor -v
+
+      - name: Get dependencies
+        working-directory: frosty
+        run: flutter pub get
+
+      - name: Build unsigned IPA
+        working-directory: frosty
+        run: |
+          flutter build ipa --release --no-codesign
+          # Fallback if ipa command behaves differently
+          if [ ! -f build/ios/ipa/*.ipa ]; then
+            echo "IPA not found in expected location, listing build dir:"
+            find build -name "*.ipa" -o -name "Runner.app" | head -20
+            # Manual package if needed
+            if [ -d build/ios/iphoneos/Runner.app ]; then
+              mkdir -p Payload
+              cp -r build/ios/iphoneos/Runner.app Payload/
+              zip -r Frosty-unsigned.ipa Payload
+              mkdir -p build/ios/ipa
+              mv Frosty-unsigned.ipa build/ios/ipa/
+            fi
+          fi
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frosty-unsigned-ipa
+          path: |
+            frosty/build/ios/ipa/*.ipa
+            frosty/Frosty-unsigned.ipa
+          if-no-files-found: warn
+          retention-days: 5
