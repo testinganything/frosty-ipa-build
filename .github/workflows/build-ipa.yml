@@ -21,11 +21,35 @@ jobs:
           path: frosty
           ref: main
 
+      - name: Apply playback reliability patches
+        run: |
+          set -e
+          cd frosty
+
+          # 1) Lower stall detection delay 8s -> 5s
+          sed -i '' 's/static const stallDetectionDelay = Duration(seconds: 8);/static const stallDetectionDelay = Duration(seconds: 5);/' \
+            lib/screens/channel/video/video_timing_constants.dart
+
+          # 2) Lower high-latency threshold 30s -> 12s
+          sed -i '' 's/static const int highLatencyThresholdSeconds = 30;/static const int highLatencyThresholdSeconds = 12;/' \
+            lib/screens/channel/video/video_timing_constants.dart
+
+          # 3) More precise latency readout (from upstream PR #578 intent)
+          #    '${rounded}s' -> '${seconds.toStringAsFixed(2)}s'
+          if grep -q "final newLatency = '\${rounded}s';" lib/screens/channel/video/native_video_store.dart; then
+            sed -i '' "s/final newLatency = '\${rounded}s';/final newLatency = '\${seconds.toStringAsFixed(2)}s';/" \
+              lib/screens/channel/video/native_video_store.dart
+          fi
+
+          echo "=== Patched constants ==="
+          grep -n 'stallDetectionDelay\|highLatencyThresholdSeconds' lib/screens/channel/video/video_timing_constants.dart || true
+          echo "=== Latency display ==="
+          grep -n 'newLatency' lib/screens/channel/video/native_video_store.dart | head -5 || true
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          # Match pubspec pin if available; otherwise latest stable
           flutter-version: '3.47.6'
           cache: true
 
@@ -37,7 +61,6 @@ jobs:
         working-directory: frosty
         run: |
           flutter pub get
-          # Show resolved Flutter version for debugging
           flutter --version
 
       - name: Build unsigned IPA
@@ -50,7 +73,6 @@ jobs:
           echo "Listing build outputs:"
           find build -type f \( -name "*.ipa" -o -name "Runner.app" -o -name "*.app" \) 2>/dev/null | head -30 || true
 
-          # Fallback: build ios then package manually
           if ! ls build/ios/ipa/*.ipa 1>/dev/null 2>&1; then
             echo "No IPA found, trying flutter build ios --no-codesign..."
             flutter build ios --release --no-codesign || true
@@ -83,7 +105,7 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: frosty-unsigned-ipa
+          name: frosty-unsigned-ipa-patched
           path: |
             frosty/build/ios/ipa/*.ipa
           if-no-files-found: error
