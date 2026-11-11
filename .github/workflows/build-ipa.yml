@@ -7,8 +7,8 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
-    timeout-minutes: 60
+    runs-on: macos-latest
+    timeout-minutes: 90
 
     steps:
       - name: Checkout this repo
@@ -25,6 +25,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Match pubspec pin if available; otherwise latest stable
           flutter-version: '3.47.6'
           cache: true
 
@@ -34,25 +35,50 @@ jobs:
 
       - name: Get dependencies
         working-directory: frosty
-        run: flutter pub get
+        run: |
+          flutter pub get
+          # Show resolved Flutter version for debugging
+          flutter --version
 
       - name: Build unsigned IPA
         working-directory: frosty
         run: |
-          flutter build ipa --release --no-codesign
-          # Fallback if ipa command behaves differently
-          if [ ! -f build/ios/ipa/*.ipa ]; then
-            echo "IPA not found in expected location, listing build dir:"
-            find build -name "*.ipa" -o -name "Runner.app" | head -20
-            # Manual package if needed
-            if [ -d build/ios/iphoneos/Runner.app ]; then
+          set -e
+          echo "Attempting flutter build ipa --no-codesign..."
+          flutter build ipa --release --no-codesign || true
+
+          echo "Listing build outputs:"
+          find build -type f \( -name "*.ipa" -o -name "Runner.app" -o -name "*.app" \) 2>/dev/null | head -30 || true
+
+          # Fallback: build ios then package manually
+          if ! ls build/ios/ipa/*.ipa 1>/dev/null 2>&1; then
+            echo "No IPA found, trying flutter build ios --no-codesign..."
+            flutter build ios --release --no-codesign || true
+
+            APP_PATH=""
+            if [ -d "build/ios/iphoneos/Runner.app" ]; then
+              APP_PATH="build/ios/iphoneos/Runner.app"
+            elif [ -d "build/ios/Release-iphoneos/Runner.app" ]; then
+              APP_PATH="build/ios/Release-iphoneos/Runner.app"
+            fi
+
+            if [ -n "$APP_PATH" ]; then
+              echo "Packaging $APP_PATH into IPA..."
+              rm -rf Payload
               mkdir -p Payload
-              cp -r build/ios/iphoneos/Runner.app Payload/
+              cp -R "$APP_PATH" Payload/
               zip -r Frosty-unsigned.ipa Payload
               mkdir -p build/ios/ipa
               mv Frosty-unsigned.ipa build/ios/ipa/
+              echo "Created build/ios/ipa/Frosty-unsigned.ipa"
+            else
+              echo "ERROR: Could not find Runner.app to package"
+              find build -name "Runner.app" 2>/dev/null || true
+              exit 1
             fi
           fi
+
+          ls -la build/ios/ipa/ || true
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
@@ -60,6 +86,5 @@ jobs:
           name: frosty-unsigned-ipa
           path: |
             frosty/build/ios/ipa/*.ipa
-            frosty/Frosty-unsigned.ipa
-          if-no-files-found: warn
-          retention-days: 5
+          if-no-files-found: error
+          retention-days: 7
