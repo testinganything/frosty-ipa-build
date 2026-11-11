@@ -1,0 +1,29 @@
+--- a/lib/screens/channel/video/video_timing_constants.dart
++++ b/lib/screens/channel/video/video_timing_constants.dart
+@@ -12,7 +12,11 @@ class VideoTimingConstants {
+   // on 1s < stallDetectionDelay < 12s — Dart's attempt-1 seek must pre-empt
+   // the Android watchdog's heavier stop()/prepare() recovery, and iOS has
+   // no native watchdog so the Dart timer is the only recoverer for silent
+-  // rate-drops there. Don't tune past either neighbor.
+-  static const stallDetectionDelay = Duration(seconds: 8);
++  // rate-drops there. Don't tune past either neighbor.
++  //
++  // Tuned from 8s -> 5s: users report multi-second freezes while audio
++  // continues. 5s still sits above iOS native ~1s recovery and below the
++  // Android 12s watchdog.
++  static const stallDetectionDelay = Duration(seconds: 5);
+   static const initRetryDelay = Duration(seconds: 3);
+   static const int maxRefreshAttempts = 3;
+ 
+@@ -35,8 +39,11 @@ class VideoTimingConstants {
+ 
+   // Latency / chat sync
+   static const latencyPollingInterval = Duration(seconds: 3);
+-  static const int highLatencyThresholdSeconds = 30;
++  // After the native plugin low-latency work (~3s target on Android), 30s was
++  // far too passive. 12s catches real drift without treating healthy ~3-6s
++  // live latency as a failure. iOS still trends higher; 12s is a compromise.
++  static const int highLatencyThresholdSeconds = 12;
+   static const int chatSyncDriftToleranceSeconds = 2;
+ 
+   /// Maximum consecutive high-latency interventions (seek/refresh) before
