@@ -34,17 +34,41 @@ jobs:
           sed -i '' 's/static const int highLatencyThresholdSeconds = 30;/static const int highLatencyThresholdSeconds = 12;/' \
             lib/screens/channel/video/video_timing_constants.dart
 
-          # 3) More precise latency readout (from upstream PR #578 intent)
-          #    '${rounded}s' -> '${seconds.toStringAsFixed(2)}s'
+          # 3) More precise latency readout
           if grep -q "final newLatency = '\${rounded}s';" lib/screens/channel/video/native_video_store.dart; then
             sed -i '' "s/final newLatency = '\${rounded}s';/final newLatency = '\${seconds.toStringAsFixed(2)}s';/" \
               lib/screens/channel/video/native_video_store.dart
           fi
 
+          # 4) Coordinate recovery: do not high-latency-seek while a stall is active.
+          #    Prevents concurrent seekToLiveEdge from stall timer + latency poll,
+          #    which can contribute to backward jumps / desync reports.
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path('lib/screens/channel/video/native_video_store.dart')
+          t = p.read_text()
+          old = """if (rounded >= VideoTimingConstants.highLatencyThresholdSeconds &&
+        !_paused &&
+        !_loading &&
+        !_userPaused) {"""
+          new = """if (rounded >= VideoTimingConstants.highLatencyThresholdSeconds &&
+        !_paused &&
+        !_loading &&
+        !_userPaused &&
+        !_isStalled) {"""
+          if old in t:
+            p.write_text(t.replace(old, new, 1))
+            print('Applied concurrent-recovery guard (!_isStalled)')
+          else:
+            print('WARN: high-latency guard pattern not found; skipping')
+          PY
+
           echo "=== Patched constants ==="
           grep -n 'stallDetectionDelay\|highLatencyThresholdSeconds' lib/screens/channel/video/video_timing_constants.dart || true
           echo "=== Latency display ==="
           grep -n 'newLatency' lib/screens/channel/video/native_video_store.dart | head -5 || true
+          echo "=== Recovery guard ==="
+          grep -n '_isStalled' lib/screens/channel/video/native_video_store.dart | head -10 || true
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
